@@ -1,0 +1,61 @@
+# Локальный учебный стенд. Пароли в Secret демонстрационные.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      automountServiceAccountToken: false
+      initContainers:
+      - name: wait-for-apis
+        image: busybox:1.37
+        command:
+        - sh
+        - -c
+        - until wget -T 3 -q -O /dev/null http://accounts:8000/ready && wget -T 3 -q -O /dev/null
+          http://team-info:8000/ready; do sleep 2; done
+      containers:
+      - name: frontend
+        image: localhost:32000/volleyball-team-frontend:k8s-v1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 80
+          periodSeconds: 5
+          timeoutSeconds: 3
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 80
+          periodSeconds: 5
+          timeoutSeconds: 3
+        resources:
+          requests:
+            cpu: 50m
+            memory: 32Mi
+          limits:
+            cpu: 500m
+            memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+spec:
+  selector:
+    app: frontend
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80

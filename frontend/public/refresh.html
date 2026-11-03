@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Обновление VOLNA</title><style>body{margin:0;background:#111;color:#eee;font:16px/1.6 Arial,sans-serif;display:grid;place-items:center;min-height:100vh}main{max-width:650px;margin:25px;padding:35px;border:2px solid #c6be83;border-radius:10px}h1{font-size:27px}button,a{display:inline-block;padding:12px 18px;border:0;background:#c6be83;color:#171717;border-radius:4px;font-weight:bold;cursor:pointer;text-decoration:none}pre{white-space:pre-wrap;color:#cfcab5;font-size:14px}button:disabled{opacity:.5}</style></head><body><main><h1>Обновление сайта VOLNA</h1><p>Проверка версии, которую получает ваш браузер. Вход в аккаунт, настройки темы и данные игроков сохранятся.</p><pre id="status">Проверяем…</pre><button id="refresh" disabled>Загрузить актуальную главную страницу</button></main><script>
+const output=document.getElementById('status');const button=document.getElementById('refresh');
+(async()=>{try{
+ const response=await fetch('/?check='+Date.now(),{cache:'no-store'});const html=await response.text();
+ const asset=html.match(/src="([^"]+\.js)"/);if(!asset)throw Error('Не найдена сборка приложения');
+ const js=await(await fetch(asset[1],{cache:'reload'})).text();
+ const registrations='serviceWorker' in navigator?await navigator.serviceWorker.getRegistrations():[];
+ const workers=registrations.filter(r=>new URL(r.scope).origin===location.origin);
+ output.textContent='Версия: '+asset[1]+'\nКнопка профиля в сборке: '+(js.includes('header-profile')?'есть':'нет')+'\nService worker: '+workers.length+'\nТекущий адрес: '+location.origin;
+ if(!js.includes('header-profile')){output.textContent+='\nНужно пересобрать frontend из обновлённой папки проекта.';return}
+ button.disabled=false;
+ button.onclick=async()=>{button.disabled=true;try{for(const worker of workers)await worker.unregister();await fetch('/index.html?refresh='+Date.now(),{cache:'reload'});location.replace('/?release='+Date.now()+'#top')}catch(error){output.textContent+='\n'+error.message;button.disabled=false}};
+}catch(error){output.textContent='Не удалось проверить версию: '+error.message}})();
+</script></body></html>

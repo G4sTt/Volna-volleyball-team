@@ -1,0 +1,189 @@
+# Локальный учебный стенд. Пароли в Secret демонстрационные.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: accounts-db-credentials
+type: Opaque
+stringData:
+  password: test_password
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: accounts-db
+spec:
+  selector:
+    app: accounts-db
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: 5432
+  clusterIP: None
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: accounts-db
+spec:
+  serviceName: accounts-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: accounts-db
+  template:
+    metadata:
+      labels:
+        app: accounts-db
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - name: postgres
+        image: postgres:17
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          value: accounts
+        - name: POSTGRES_USER
+          value: accounts_user
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: accounts-db-credentials
+              key: password
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql/data
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - accounts_user
+            - -d
+            - accounts
+          periodSeconds: 5
+          timeoutSeconds: 3
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: '1'
+            memory: 512Mi
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: accounts-avatars
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: accounts
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: accounts
+  template:
+    metadata:
+      labels:
+        app: accounts
+    spec:
+      automountServiceAccountToken: false
+      initContainers:
+      - name: wait-for-postgres
+        image: postgres:17
+        command:
+        - sh
+        - -c
+        - until pg_isready -h accounts-db -p 5432 -U accounts_user -d accounts; do
+          sleep 2; done
+      containers:
+      - name: accounts
+        image: localhost:32000/volleyball-team-accounts:k8s-v1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8000
+        env:
+        - name: DB_HOST
+          value: accounts-db
+        - name: DB_PORT
+          value: '5432'
+        - name: DB_NAME
+          value: accounts
+        - name: DB_USER
+          value: accounts_user
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: accounts-db-credentials
+              key: password
+        - name: UPLOAD_DIR
+          value: /app/uploads
+        volumeMounts:
+        - name: uploads
+          mountPath: /app/uploads
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 36
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          periodSeconds: 5
+          timeoutSeconds: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 10
+          timeoutSeconds: 3
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: '1'
+            memory: 512Mi
+      volumes:
+      - name: uploads
+        persistentVolumeClaim:
+          claimName: accounts-avatars
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: accounts
+spec:
+  selector:
+    app: accounts
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000

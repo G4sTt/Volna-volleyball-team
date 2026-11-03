@@ -1,0 +1,142 @@
+# Основной запуск проекта — Kubernetes, сайт http://localhost:8088.
+# Compose оставлен для отдельной практики и включается только профилем compose-lab.
+# Обе конфигурации используют разные базы; одновременно запускать их не нужно.
+services:
+  accounts-db:
+    profiles: [compose-lab]
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: accounts
+      POSTGRES_USER: accounts_user
+      POSTGRES_PASSWORD: ${ACCOUNTS_DB_PASSWORD:?Set ACCOUNTS_DB_PASSWORD in .env}
+    volumes:
+    - accounts-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  team-info-db:
+    profiles: [compose-lab]
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: team_info
+      POSTGRES_USER: team_info_user
+      POSTGRES_PASSWORD: ${TEAM_INFO_DB_PASSWORD:-team_info_lab_password}
+    volumes:
+    - team-info-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  accounts:
+    profiles: [compose-lab]
+    build: ./services/accounts
+    restart: unless-stopped
+    environment:
+      DB_HOST: accounts-db
+      DB_PORT: '5432'
+      DB_NAME: accounts
+      DB_USER: accounts_user
+      DB_PASSWORD: ${ACCOUNTS_DB_PASSWORD:?Set ACCOUNTS_DB_PASSWORD in .env}
+    volumes:
+    - player-photos:/app/uploads
+    depends_on:
+      accounts-db:
+        condition: service_healthy
+    healthcheck:
+      # Команда выполняется внутри контейнера. urllib входит в Python.
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3).close()
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    ports:
+    - 8001:8000
+  team-info:
+    profiles: [compose-lab]
+    build: ./services/team_info
+    restart: unless-stopped
+    environment:
+      DB_HOST: team-info-db
+      DB_PORT: '5432'
+      DB_NAME: team_info
+      DB_USER: team_info_user
+      DB_PASSWORD: ${TEAM_INFO_DB_PASSWORD:-team_info_lab_password}
+      ACCOUNTS_URL: http://accounts:8000
+    volumes:
+    - team-info-photos:/app/uploads
+    depends_on:
+      team-info-db:
+        condition: service_healthy
+    healthcheck:
+      # /ready проверяет API и подключение к его PostgreSQL.
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3).close()
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    ports:
+    - 8002:8000
+  frontend:
+    profiles: [compose-lab]
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+    - "127.0.0.1:8088:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    depends_on:
+      accounts:
+        condition: service_healthy
+      team-info:
+        condition: service_healthy
+  pgadmin:
+    profiles: [compose-lab]
+    image: dpage/pgadmin4:9.18
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-pgadmin_lab_password}
+      PGADMIN_REPLACE_SERVERS_ON_STARTUP: 'True'
+    volumes:
+    - pgadmin-data:/var/lib/pgadmin
+    - ./database/pgadmin-servers.json:/pgadmin4/servers.json:ro
+    ports:
+    - 8081:80
+    depends_on:
+      accounts-db:
+        condition: service_healthy
+      team-info-db:
+        condition: service_healthy
+volumes:
+  accounts-data: null
+  team-info-data: null
+  player-photos: null
+  team-info-photos: null
+  pgadmin-data: null
+  postgres-data: null
+  mysql-data: null

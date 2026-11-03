@@ -1,0 +1,114 @@
+# Локальный учебный стенд. Пароли в Secret демонстрационные.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pgadmin-credentials
+type: Opaque
+stringData:
+  password: pgadmin_lab_password
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pgadmin-servers
+data:
+  servers.json: "{\n  \"Servers\": {\n    \"1\": {\n      \"Name\": \"Accounts PostgreSQL\"\
+    ,\n      \"Group\": \"Volleyball\",\n      \"Host\": \"accounts-db\",\n      \"\
+    Port\": 5432,\n      \"MaintenanceDB\": \"accounts\",\n      \"Username\": \"\
+    accounts_user\",\n      \"SSLMode\": \"prefer\"\n    },\n    \"2\": {\n      \"\
+    Name\": \"Team Info PostgreSQL\",\n      \"Group\": \"Volleyball\",\n      \"\
+    Host\": \"team-info-db\",\n      \"Port\": 5432,\n      \"MaintenanceDB\": \"\
+    team_info\",\n      \"Username\": \"team_info_user\",\n      \"SSLMode\": \"prefer\"\
+    \n    }\n  }\n}"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pgadmin-data
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgadmin
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: pgadmin
+  template:
+    metadata:
+      labels:
+        app: pgadmin
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 5050
+      containers:
+      - name: pgadmin
+        image: dpage/pgadmin4:9.18
+        ports:
+        - containerPort: 80
+        env:
+        - name: PGADMIN_DEFAULT_EMAIL
+          value: admin@example.com
+        - name: PGADMIN_DEFAULT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: pgadmin-credentials
+              key: password
+        - name: PGADMIN_REPLACE_SERVERS_ON_STARTUP
+          value: 'True'
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/pgadmin
+        - name: servers
+          mountPath: /pgadmin4/servers.json
+          subPath: servers.json
+          readOnly: true
+        startupProbe:
+          httpGet:
+            path: /misc/ping
+            port: 80
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 60
+        readinessProbe:
+          httpGet:
+            path: /misc/ping
+            port: 80
+          periodSeconds: 5
+          timeoutSeconds: 3
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: '1'
+            memory: 768Mi
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: pgadmin-data
+      - name: servers
+        configMap:
+          name: pgadmin-servers
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgadmin
+spec:
+  selector:
+    app: pgadmin
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80

@@ -1,0 +1,22 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Accounts PostgreSQL",
+      "Group": "Volleyball",
+      "Host": "accounts-db",
+      "Port": 5432,
+      "MaintenanceDB": "accounts",
+      "Username": "accounts_user",
+      "SSLMode": "prefer"
+    },
+    "2": {
+      "Name": "Team Info PostgreSQL",
+      "Group": "Volleyball",
+      "Host": "team-info-db",
+      "Port": 5432,
+      "MaintenanceDB": "team_info",
+      "Username": "team_info_user",
+      "SSLMode": "prefer"
+    }
+  }
+}

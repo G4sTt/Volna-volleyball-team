@@ -1,0 +1,191 @@
+# Локальный учебный стенд. Пароли в Secret демонстрационные.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: team-info-db-credentials
+type: Opaque
+stringData:
+  password: team_info_lab_password
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: team-info-db
+spec:
+  selector:
+    app: team-info-db
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: 5432
+  clusterIP: None
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: team-info-db
+spec:
+  serviceName: team-info-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: team-info-db
+  template:
+    metadata:
+      labels:
+        app: team-info-db
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - name: postgres
+        image: postgres:17
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          value: team_info
+        - name: POSTGRES_USER
+          value: team_info_user
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: team-info-db-credentials
+              key: password
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql/data
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - team_info_user
+            - -d
+            - team_info
+          periodSeconds: 5
+          timeoutSeconds: 3
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: '1'
+            memory: 512Mi
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: team-info-photos
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: team-info
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: team-info
+  template:
+    metadata:
+      labels:
+        app: team-info
+    spec:
+      automountServiceAccountToken: false
+      initContainers:
+      - name: wait-for-postgres
+        image: postgres:17
+        command:
+        - sh
+        - -c
+        - until pg_isready -h team-info-db -p 5432 -U team_info_user -d team_info;
+          do sleep 2; done
+      containers:
+      - name: team-info
+        image: localhost:32000/volleyball-team-team-info:k8s-v1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8000
+        env:
+        - name: DB_HOST
+          value: team-info-db
+        - name: DB_PORT
+          value: '5432'
+        - name: DB_NAME
+          value: team_info
+        - name: DB_USER
+          value: team_info_user
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: team-info-db-credentials
+              key: password
+        - name: UPLOAD_DIR
+          value: /app/uploads
+        - name: ACCOUNTS_URL
+          value: http://accounts:8000
+        volumeMounts:
+        - name: uploads
+          mountPath: /app/uploads
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 36
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          periodSeconds: 5
+          timeoutSeconds: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 10
+          timeoutSeconds: 3
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: '1'
+            memory: 512Mi
+      volumes:
+      - name: uploads
+        persistentVolumeClaim:
+          claimName: team-info-photos
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: team-info
+spec:
+  selector:
+    app: team-info
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000
