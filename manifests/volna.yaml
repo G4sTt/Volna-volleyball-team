@@ -1,0 +1,600 @@
+apiVersion: v1
+data:
+  servers.json: |-
+    {
+      "Servers": {
+        "1": {
+          "Name": "Accounts PostgreSQL",
+          "Group": "Volleyball",
+          "Host": "accounts-db",
+          "Port": 5432,
+          "MaintenanceDB": "accounts",
+          "Username": "accounts_user",
+          "SSLMode": "prefer"
+        },
+        "2": {
+          "Name": "Team Info PostgreSQL",
+          "Group": "Volleyball",
+          "Host": "team-info-db",
+          "Port": 5432,
+          "MaintenanceDB": "team_info",
+          "Username": "team_info_user",
+          "SSLMode": "prefer"
+        }
+      }
+    }
+kind: ConfigMap
+metadata:
+  name: pgadmin-servers
+  namespace: default
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: accounts-db-credentials
+  namespace: default
+stringData:
+  password: test_password
+type: Opaque
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pgadmin-credentials
+  namespace: default
+stringData:
+  password: pgadmin_lab_password
+type: Opaque
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: team-info-db-credentials
+  namespace: default
+stringData:
+  password: team_info_lab_password
+type: Opaque
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: accounts
+  namespace: default
+spec:
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000
+  selector:
+    app: accounts
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: accounts-db
+  namespace: default
+spec:
+  clusterIP: None
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: 5432
+  selector:
+    app: accounts-db
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: default
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+  selector:
+    app: frontend
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgadmin
+  namespace: default
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+  selector:
+    app: pgadmin
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: team-info
+  namespace: default
+spec:
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000
+  selector:
+    app: team-info
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: team-info-db
+  namespace: default
+spec:
+  clusterIP: None
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: 5432
+  selector:
+    app: team-info-db
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+  name: accounts-avatars
+  namespace: default
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+  name: pgadmin-data
+  namespace: default
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+  name: team-info-photos
+  namespace: default
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: accounts
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: accounts
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: accounts
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - env:
+        - name: DB_HOST
+          value: accounts-db
+        - name: DB_PORT
+          value: "5432"
+        - name: DB_NAME
+          value: accounts
+        - name: DB_USER
+          value: accounts_user
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: accounts-db-credentials
+        - name: UPLOAD_DIR
+          value: /app/uploads
+        image: ghcr.io/g4stt/volleyball-team-accounts:sha-8304fd4446a095e6e042fe3daa31ee6d4589699c
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 10
+          timeoutSeconds: 3
+        name: accounts
+        ports:
+        - containerPort: 8000
+          name: http
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          periodSeconds: 5
+          timeoutSeconds: 3
+        resources:
+          limits:
+            cpu: "1"
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        startupProbe:
+          failureThreshold: 36
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 5
+          timeoutSeconds: 3
+        volumeMounts:
+        - mountPath: /app/uploads
+          name: uploads
+      imagePullSecrets:
+      - name: ghcr-credentials
+      initContainers:
+      - command:
+        - sh
+        - -c
+        - until pg_isready -h accounts-db -p 5432 -U accounts_user -d accounts; do
+          sleep 2; done
+        image: postgres:17
+        name: wait-for-postgres
+      volumes:
+      - name: uploads
+        persistentVolumeClaim:
+          claimName: accounts-avatars
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - image: ghcr.io/g4stt/volleyball-team-frontend:sha-8304fd4446a095e6e042fe3daa31ee6d4589699c
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 80
+          periodSeconds: 5
+          timeoutSeconds: 3
+        name: frontend
+        ports:
+        - containerPort: 80
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 80
+          periodSeconds: 5
+          timeoutSeconds: 3
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 50m
+            memory: 32Mi
+      imagePullSecrets:
+      - name: ghcr-credentials
+      initContainers:
+      - command:
+        - sh
+        - -c
+        - until wget -T 3 -q -O /dev/null http://accounts:8000/ready && wget -T 3
+          -q -O /dev/null http://team-info:8000/ready; do sleep 2; done
+        image: busybox:1.37
+        name: wait-for-apis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgadmin
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pgadmin
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: pgadmin
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - env:
+        - name: PGADMIN_DEFAULT_EMAIL
+          value: admin@example.com
+        - name: PGADMIN_DEFAULT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: pgadmin-credentials
+        - name: PGADMIN_REPLACE_SERVERS_ON_STARTUP
+          value: "True"
+        image: dpage/pgadmin4:9.18
+        name: pgadmin
+        ports:
+        - containerPort: 80
+        readinessProbe:
+          httpGet:
+            path: /misc/ping
+            port: 80
+          periodSeconds: 5
+          timeoutSeconds: 3
+        resources:
+          limits:
+            cpu: "1"
+            memory: 768Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        startupProbe:
+          failureThreshold: 60
+          httpGet:
+            path: /misc/ping
+            port: 80
+          periodSeconds: 5
+          timeoutSeconds: 3
+        volumeMounts:
+        - mountPath: /var/lib/pgadmin
+          name: data
+        - mountPath: /pgadmin4/servers.json
+          name: servers
+          readOnly: true
+          subPath: servers.json
+      securityContext:
+        fsGroup: 5050
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: pgadmin-data
+      - configMap:
+          name: pgadmin-servers
+        name: servers
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: team-info
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: team-info
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: team-info
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - env:
+        - name: DB_HOST
+          value: team-info-db
+        - name: DB_PORT
+          value: "5432"
+        - name: DB_NAME
+          value: team_info
+        - name: DB_USER
+          value: team_info_user
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: team-info-db-credentials
+        - name: UPLOAD_DIR
+          value: /app/uploads
+        - name: ACCOUNTS_URL
+          value: http://accounts:8000
+        image: ghcr.io/g4stt/volleyball-team-team-info:sha-8304fd4446a095e6e042fe3daa31ee6d4589699c
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 10
+          timeoutSeconds: 3
+        name: team-info
+        ports:
+        - containerPort: 8000
+          name: http
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          periodSeconds: 5
+          timeoutSeconds: 3
+        resources:
+          limits:
+            cpu: "1"
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        startupProbe:
+          failureThreshold: 36
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 5
+          timeoutSeconds: 3
+        volumeMounts:
+        - mountPath: /app/uploads
+          name: uploads
+      imagePullSecrets:
+      - name: ghcr-credentials
+      initContainers:
+      - command:
+        - sh
+        - -c
+        - until pg_isready -h team-info-db -p 5432 -U team_info_user -d team_info;
+          do sleep 2; done
+        image: postgres:17
+        name: wait-for-postgres
+      volumes:
+      - name: uploads
+        persistentVolumeClaim:
+          claimName: team-info-photos
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: accounts-db
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: accounts-db
+  serviceName: accounts-db
+  template:
+    metadata:
+      labels:
+        app: accounts-db
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - env:
+        - name: POSTGRES_DB
+          value: accounts
+        - name: POSTGRES_USER
+          value: accounts_user
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: accounts-db-credentials
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        image: postgres:17
+        name: postgres
+        ports:
+        - containerPort: 5432
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - accounts_user
+            - -d
+            - accounts
+          periodSeconds: 5
+          timeoutSeconds: 3
+        resources:
+          limits:
+            cpu: "1"
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - mountPath: /var/lib/postgresql/data
+          name: data
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: team-info-db
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: team-info-db
+  serviceName: team-info-db
+  template:
+    metadata:
+      labels:
+        app: team-info-db
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - env:
+        - name: POSTGRES_DB
+          value: team_info
+        - name: POSTGRES_USER
+          value: team_info_user
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: team-info-db-credentials
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        image: postgres:17
+        name: postgres
+        ports:
+        - containerPort: 5432
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - team_info_user
+            - -d
+            - team_info
+          periodSeconds: 5
+          timeoutSeconds: 3
+        resources:
+          limits:
+            cpu: "1"
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - mountPath: /var/lib/postgresql/data
+          name: data
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi
