@@ -131,3 +131,59 @@ jobs:
       - name: Remove CI containers and test volumes
         if: always()
         run: docker compose down --volumes --remove-orphans
+
+  gitops:
+    name: Promote tested release to Argo CD
+    needs: integration
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+      - name: Render the tested release
+        env:
+          RELEASE_TAG: sha-${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+          path = Path('deploy/desktop/kustomization.yaml')
+          text, count = re.subn(r'(?m)^(\s*newTag:)\s*\S+\s*$', lambda m: m[1] + ' ' + os.environ['RELEASE_TAG'], path.read_text())
+          if count != 3:
+              raise SystemExit(f'Expected three image tags, found {count}')
+          path.write_text(text)
+          PY
+          kubectl kustomize deploy/desktop > "$RUNNER_TEMP/volna-manifests.yaml"
+      - name: Update the deployment branch
+        run: |
+          git fetch origin dev
+          if [ "$(git rev-parse origin/dev)" != "$GITHUB_SHA" ]; then
+            echo 'A newer source commit exists; its workflow will promote the next release.'
+            exit 0
+          fi
+
+          if git ls-remote --exit-code --heads origin deploy > /dev/null; then
+            git fetch origin deploy
+            git switch --discard-changes -C deploy origin/deploy
+          else
+            git restore deploy/desktop/kustomization.yaml
+            git switch --orphan deploy
+          fi
+
+          mkdir -p manifests
+          cp "$RUNNER_TEMP/volna-manifests.yaml" manifests/volna.yaml
+          printf '%s\n' "$GITHUB_SHA" > manifests/source-revision.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add manifests/volna.yaml manifests/source-revision.txt
+          if git diff --cached --quiet; then
+            echo 'The tested release is already promoted.'
+            exit 0
+          fi
+          git commit -m "chore(deploy): promote sha-$GITHUB_SHA"
+          git push origin HEAD:refs/heads/deploy
