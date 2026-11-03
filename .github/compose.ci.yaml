@@ -1,0 +1,102 @@
+# Isolated, disposable test environment for GitHub-hosted runners.
+# Build paths are relative to this .github directory.
+services:
+  accounts-db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: accounts
+      POSTGRES_USER: accounts_user
+      POSTGRES_PASSWORD: ci_accounts_only
+    volumes:
+      - accounts-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  team-info-db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: team_info
+      POSTGRES_USER: team_info_user
+      POSTGRES_PASSWORD: ci_team_info_only
+    volumes:
+      - team-info-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  accounts:
+    build: ../services/accounts
+    environment:
+      DB_HOST: accounts-db
+      DB_PORT: '5432'
+      DB_NAME: accounts
+      DB_USER: accounts_user
+      DB_PASSWORD: ci_accounts_only
+    volumes:
+      - accounts-avatars:/app/uploads
+    depends_on:
+      accounts-db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3).close()"
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  team-info:
+    build: ../services/team_info
+    environment:
+      DB_HOST: team-info-db
+      DB_PORT: '5432'
+      DB_NAME: team_info
+      DB_USER: team_info_user
+      DB_PASSWORD: ci_team_info_only
+      ACCOUNTS_URL: http://accounts:8000
+    volumes:
+      - team-info-photos:/app/uploads
+    depends_on:
+      team-info-db:
+        condition: service_healthy
+      accounts:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3).close()"
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  frontend:
+    build: ../frontend
+    ports:
+      - '127.0.0.1:18088:80'
+    depends_on:
+      accounts:
+        condition: service_healthy
+      team-info:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, wget, -q, -T, '3', -O, /dev/null, 'http://127.0.0.1/healthz']
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+volumes:
+  accounts-data:
+  team-info-data:
+  accounts-avatars:
+  team-info-photos:
