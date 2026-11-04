@@ -212,7 +212,7 @@ spec:
               name: accounts-db-credentials
         - name: UPLOAD_DIR
           value: /app/uploads
-        image: ghcr.io/g4stt/volleyball-team-accounts:sha-fdc09bab69a7c5f849a88291f3e62b40ca6c856f
+        image: ghcr.io/g4stt/volleyball-team-accounts:sha-3632c3277ed31579840711f307cfeefe872c0b5c
         imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
@@ -279,7 +279,7 @@ spec:
     spec:
       automountServiceAccountToken: false
       containers:
-      - image: ghcr.io/g4stt/volleyball-team-frontend:sha-fdc09bab69a7c5f849a88291f3e62b40ca6c856f
+      - image: ghcr.io/g4stt/volleyball-team-frontend:sha-3632c3277ed31579840711f307cfeefe872c0b5c
         imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
@@ -421,7 +421,7 @@ spec:
           value: /app/uploads
         - name: ACCOUNTS_URL
           value: http://accounts:8000
-        image: ghcr.io/g4stt/volleyball-team-team-info:sha-fdc09bab69a7c5f849a88291f3e62b40ca6c856f
+        image: ghcr.io/g4stt/volleyball-team-team-info:sha-3632c3277ed31579840711f307cfeefe872c0b5c
         imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
