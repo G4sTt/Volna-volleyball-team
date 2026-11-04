@@ -108,6 +108,20 @@ foreach ($deploymentName in @('accounts', 'team-info', 'frontend', 'pgadmin')) {
 }
 } else {
     Invoke-Kube get nodes --request-timeout=10s
+    $forwardedServices = @('frontend', 'pgadmin')
+    if ($ApiPorts) { $forwardedServices += @('accounts', 'team-info') }
+    $missingServices = @()
+    foreach ($serviceName in $forwardedServices) {
+        $existingService = & $kubectlCommand.Source --context $contextName --namespace $namespaceName get service $serviceName -o name --ignore-not-found --request-timeout=10s
+        if ($LASTEXITCODE -ne 0) { throw "Could not check service/$serviceName in namespace $namespaceName." }
+        if (-not $existingService) { $missingServices += $serviceName }
+    }
+    if ($missingServices.Count) {
+        throw "VOLNA is not deployed in context $contextName, namespace $namespaceName. Missing services: $($missingServices -join ', '). -PortForwardOnly opens an existing deployment; a Ready node alone is not enough. For a new or reset cluster, run scripts/set-ghcr-secret.ps1, then scripts/install-argocd.ps1 and wait for Application volna to become Synced/Healthy before retrying. See README for cluster recovery."
+    }
+    foreach ($serviceName in $forwardedServices) {
+        Invoke-Kube rollout status "deployment/$serviceName" --timeout=300s
+    }
 }
 
 & (Join-Path $PSScriptRoot 'stop-k8s.ps1')
